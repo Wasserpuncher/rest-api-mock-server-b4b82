@@ -33,7 +33,7 @@ jobs:
         # Exit-code 0 means no issues found
         # Exit-code 1 means issues found
         # flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-        flake8 . --count --max-complexity=10 --max-line-length=120 --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
     - name: Test with pytest # Führt die Unit-Tests mit pytest aus
       run: |

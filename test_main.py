@@ -13,13 +13,12 @@ class TestMockAPIHandler(unittest.TestCase):
         """
         Wird vor jedem Test ausgeführt. Initialisiert einen Mock-Anfrage-Handler.
         """
-        # Erstelle einen Mock-Request und Client-Adresse für den Handler
-        self.mock_request = MagicMock() # Simuliert eine Socket-Verbindung
-        self.mock_client_address = ('127.0.0.1', 12345) # Simuliert die Client-Adresse
-        self.mock_server = MagicMock() # Simuliert den HTTP-Server
-
-        # Erstelle eine Instanz des Handlers mit Mocks
-        self.handler = MockAPIHandler(self.mock_request, self.mock_client_address, self.mock_server)
+        # BaseHTTPRequestHandler.__init__ würde beim normalen Konstruktor sofort die
+        # Request-Maschinerie (setup/handle) starten und aus dem gemockten Socket lesen,
+        # was zu "decoding to str: need a bytes-like object, MagicMock found" führt.
+        # Daher erzeugen wir die Instanz ohne __init__ und statten sie mit echten Stubs aus,
+        # sodass die Dispatch-Logik von MockAPIHandler echt geprüft wird.
+        self.handler = MockAPIHandler.__new__(MockAPIHandler)
 
         # Mocke die Methoden, die HTTP-Antworten senden
         self.handler.send_response = MagicMock() # Simuliert das Senden des Statuscodes
