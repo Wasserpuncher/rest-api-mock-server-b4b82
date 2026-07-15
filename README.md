@@ -2,7 +2,7 @@
 
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![GitHub Actions](https://github.com/your-username/rest-api-mock-server/workflows/Python%20application/badge.svg)
+![GitHub Actions](https://github.com/Wasserpuncher/rest-api-mock-server-b4b82/workflows/Python%20application/badge.svg)
 
 A lightweight, Python `http.server`-based REST-API mock server designed for rapid development and testing. This project provides a simple yet effective way to simulate API responses, allowing frontend and client-side development to proceed without waiting for a fully functional backend.
 
@@ -19,7 +19,7 @@ A lightweight, Python `http.server`-based REST-API mock server designed for rapi
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/rest-api-mock-server.git
+    git clone https://github.com/Wasserpuncher/rest-api-mock-server-b4b82.git
     cd rest-api-mock-server
     ```
 
