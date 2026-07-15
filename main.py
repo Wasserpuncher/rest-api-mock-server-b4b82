@@ -2,7 +2,9 @@ import http.server
 import socketserver
 import json
 import logging
-from typing import Dict, Any
+import os
+import argparse
+from typing import Dict, Any, Optional
 
 # Konfiguriere das Logging für bessere Sichtbarkeit
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -92,22 +94,80 @@ class MockAPIHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_response(self.path, "POST") # Sendet die entsprechende Mock-Antwort
 
-def run_server(port: int = 8000) -> None:
+def load_config(config_path: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Lädt Mock-Endpunkte und Antworten aus einer JSON-Konfigurationsdatei.
+
+    Die Datei muss ein JSON-Objekt sein, das URL-Pfade auf Methoden abbildet.
+    Beispiel::
+
+        {
+          "/api/greeting": {
+            "GET": {"status": 200, "body": {"message": "hello"}}
+          }
+        }
+
+    Args:
+        config_path (str): Pfad zur JSON-Konfigurationsdatei.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Die geladenen Mock-Definitionen, kompatibel
+        zum Format von ``MockAPIHandler.MOCK_RESPONSES``.
+
+    Raises:
+        ValueError: Wenn die Konfiguration nicht die erwartete Struktur hat.
+    """
+    with open(config_path, "r", encoding="utf-8") as config_file:
+        data = json.load(config_file) # Liest und parst die JSON-Datei.
+
+    if not isinstance(data, dict):
+        raise ValueError("Die Konfiguration muss auf oberster Ebene ein JSON-Objekt sein.")
+    for path, methods in data.items():
+        if not isinstance(methods, dict):
+            raise ValueError(f"Die Definition für den Pfad '{path}' muss ein Objekt aus Methoden sein.")
+    return data
+
+
+def create_server(port: int = 8000, mocks: Optional[Dict[str, Dict[str, Any]]] = None) -> socketserver.TCPServer:
+    """
+    Erstellt eine TCP-Server-Instanz mit dem MockAPIHandler.
+
+    Wenn ``mocks`` angegeben ist, werden diese als aktive Mock-Definitionen
+    gesetzt. Andernfalls bleiben die eingebauten ``MOCK_RESPONSES`` aktiv.
+
+    Args:
+        port (int): Der Port, auf dem der Server lauschen soll.
+        mocks (Optional[Dict]): Optionale Mock-Definitionen (z.B. aus einer Config-Datei).
+
+    Returns:
+        socketserver.TCPServer: Die (noch nicht gestartete) Server-Instanz.
+    """
+    if mocks is not None:
+        MockAPIHandler.MOCK_RESPONSES = mocks # Ersetzt die Standard-Mocks.
+    return socketserver.TCPServer(("", port), MockAPIHandler)
+
+
+def run_server(port: int = 8000, config_path: Optional[str] = None) -> None:
     """
     Startet den Mock-API-Server auf dem angegebenen Port.
 
     Args:
         port (int): Der Port, auf dem der Server lauschen soll.
+        config_path (Optional[str]): Optionaler Pfad zu einer JSON-Konfigurationsdatei
+            mit Mock-Definitionen. Wenn ``None``, werden die eingebauten Mocks verwendet.
     """
+    mocks = load_config(config_path) if config_path else None
+    if config_path:
+        logging.info(f"Lade Mock-Definitionen aus '{config_path}'")
+
     # Erstellt einen TCP-Server, der unseren MockAPIHandler verwendet
-    handler = MockAPIHandler
-    with socketserver.TCPServer(("", port), handler) as httpd:
+    with create_server(port, mocks) as httpd:
         logging.info(f"Mock-API-Server gestartet auf Port {port}") # Loggt den Serverstart
         logging.info("Verfügbare Endpunkte:")
         for path, methods in MockAPIHandler.MOCK_RESPONSES.items():
             for method in methods.keys():
                 logging.info(f"  - {method} {path}") # Listet die verfügbaren Endpunkte auf
-        
+
         try:
             httpd.serve_forever() # Startet den Server, der unendlich Anfragen verarbeitet
         except KeyboardInterrupt:
@@ -115,5 +175,42 @@ def run_server(port: int = 8000) -> None:
             httpd.shutdown() # Fährt den Server ordentlich herunter
             logging.info("Server heruntergefahren.") # Bestätigt das Herunterfahren
 
+
+DEFAULT_CONFIG_FILENAME = "config.json"  # Konventioneller Standard-Dateiname für Mock-Definitionen.
+
+
+def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
+    """
+    Parst die Befehlszeilenargumente für den Mock-Server.
+
+    Args:
+        argv (Optional[list]): Optionale Argumentliste (hauptsächlich für Tests).
+
+    Returns:
+        argparse.Namespace: Das geparste Argument-Namespace.
+    """
+    parser = argparse.ArgumentParser(
+        description="REST API mock server that can load mock endpoints from a JSON configuration file."
+    )
+    parser.add_argument(
+        "--config", "-c",
+        default=None,
+        help=(
+            "Path to a JSON file defining mock endpoints and responses. "
+            f"If omitted, '{DEFAULT_CONFIG_FILENAME}' is used when present; otherwise built-in defaults apply."
+        ),
+    )
+    parser.add_argument("--port", "-p", type=int, default=8000, help="Port to listen on (default: 8000).")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    run_server()
+    args = _parse_args()
+
+    # Bestimmt, welche Konfigurationsdatei geladen werden soll:
+    # 1. Explizit via --config, 2. Konvention 'config.json', 3. eingebaute Defaults.
+    selected_config = args.config
+    if selected_config is None and os.path.exists(DEFAULT_CONFIG_FILENAME):
+        selected_config = DEFAULT_CONFIG_FILENAME
+
+    run_server(port=args.port, config_path=selected_config)

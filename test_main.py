@@ -1,7 +1,12 @@
 import unittest
 import json
+import os
+import time
+import tempfile
+import threading
+import http.client
 from unittest.mock import MagicMock, patch
-from main import MockAPIHandler
+from main import MockAPIHandler, load_config, create_server
 
 class TestMockAPIHandler(unittest.TestCase):
     """
@@ -138,6 +143,109 @@ class TestMockAPIHandler(unittest.TestCase):
         # Der Körper sollte die Standard-POST-Antwort für /api/users sein, da der Input ignoriert wird
         expected_body = json.dumps({"message": "User created successfully", "id": 3}).encode("utf-8")
         self.handler.wfile.write.assert_called_once_with(expected_body)
+
+
+CONFIG_TEST_HOST = '127.0.0.1'
+CONFIG_TEST_PORT = 8020
+
+
+class TestConfigFileSupport(unittest.TestCase):
+    """
+    Tests für das Laden von Mock-Definitionen aus einer JSON-Konfigurationsdatei.
+
+    Es wird eine echte temporäre Datei geschrieben, mit `load_config` geladen und
+    sowohl auf Handler-Ebene als auch über einen echten laufenden Server geprüft.
+    """
+
+    config_content = {
+        "/api/config-endpoint": {
+            "GET": {"status": 200, "body": {"source": "config-file", "value": 42}},
+            "POST": {"status": 201, "body": {"created": True}}
+        }
+    }
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Sichert die eingebauten Mocks, um sie nach den Tests wiederherzustellen.
+        cls._original_mocks = MockAPIHandler.MOCK_RESPONSES
+
+        fd, cls.config_path = tempfile.mkstemp(suffix=".json", prefix="config_")
+        with os.fdopen(fd, "w", encoding="utf-8") as config_file:
+            json.dump(cls.config_content, config_file)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        # Stellt die eingebauten Mocks wieder her, damit andere Testklassen nicht beeinflusst werden.
+        MockAPIHandler.MOCK_RESPONSES = cls._original_mocks
+        if os.path.exists(cls.config_path):
+            os.remove(cls.config_path)
+
+    def test_load_config_returns_expected_dict(self) -> None:
+        """`load_config` liest die JSON-Datei korrekt ein."""
+        loaded = load_config(self.config_path)
+        self.assertEqual(loaded, self.config_content)
+
+    def test_load_config_rejects_non_object(self) -> None:
+        """Eine Top-Level-Liste statt Objekt wird abgelehnt."""
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as bad_file:
+                json.dump([1, 2, 3], bad_file)
+            with self.assertRaises(ValueError):
+                load_config(path)
+        finally:
+            os.remove(path)
+
+    def test_handler_serves_config_defined_route(self) -> None:
+        """
+        Ein Handler, der mit den geladenen Config-Mocks bestückt ist, liefert die
+        in der Datei definierte Route mit dem konfigurierten Status und Body aus.
+        """
+        loaded = load_config(self.config_path)
+        handler = MockAPIHandler.__new__(MockAPIHandler)
+        # Instanz-Attribut überschreibt das Klassen-Attribut, ohne andere Tests zu beeinflussen.
+        handler.MOCK_RESPONSES = loaded
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        handler.path = "/api/config-endpoint"
+        handler.do_GET()
+
+        handler.send_response.assert_called_once_with(200)
+        expected_body = json.dumps({"source": "config-file", "value": 42}).encode("utf-8")
+        handler.wfile.write.assert_called_once_with(expected_body)
+
+    def test_running_server_uses_config(self) -> None:
+        """
+        Ein echter Server, der über `create_server` mit den Config-Mocks gestartet
+        wird, beantwortet HTTP-Anfragen anhand der Config-Datei.
+        """
+        loaded = load_config(self.config_path)
+        httpd = create_server(CONFIG_TEST_PORT, mocks=loaded)
+        server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        server_thread.start()
+        time.sleep(0.3)
+        try:
+            conn = http.client.HTTPConnection(CONFIG_TEST_HOST, CONFIG_TEST_PORT)
+            conn.request("GET", "/api/config-endpoint")
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            data = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(data, {"source": "config-file", "value": 42})
+            conn.close()
+
+            # Eine nur im eingebauten Default vorhandene Route ist nun nicht mehr definiert.
+            conn = http.client.HTTPConnection(CONFIG_TEST_HOST, CONFIG_TEST_PORT)
+            conn.request("GET", "/api/status")
+            response = conn.getresponse()
+            self.assertEqual(response.status, 404)
+            conn.close()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            server_thread.join(timeout=1)
 
 
 if __name__ == '__main__':

@@ -47,6 +47,39 @@ python main.py
 
 The server will start on `http://localhost:8000` by default.
 
+### Loading Endpoints From a Configuration File
+
+Mock endpoints and responses can be defined externally in a JSON file instead of
+editing the code:
+
+```bash
+# Explicit config file
+python main.py --config config.json --port 8000
+
+# Convention: a file named "config.json" in the working directory is loaded
+# automatically when --config is not given.
+python main.py
+```
+
+Example `config.json`:
+
+```json
+{
+  "/api/greeting": {
+    "GET": {"status": 200, "body": {"message": "hello"}}
+  },
+  "/api/users": {
+    "GET": {"status": 200, "body": [{"id": 1, "name": "Alice"}]},
+    "POST": {"status": 201, "body": {"message": "User created", "id": 3}}
+  }
+}
+```
+
+Each response object supports `status` (defaults to `200`) and `body` (a JSON value,
+serialized to the response). Only the standard library `json` module is used, so no
+additional dependencies are required. When no configuration file is supplied, the
+built-in defaults are used and behaviour is unchanged.
+
 ### Available Endpoints (as defined in `main.py`):
 
 *   `GET /api/users`
